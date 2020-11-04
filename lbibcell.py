@@ -1,11 +1,6 @@
 import taichi as ti
-import numpy as np
-import matplotlib
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-from taichi.lang.kernel import kernel
-from help_fun import calculate_force, calculate_discrete_delta_dirac
 import taichi_glsl as ts
+import numpy as np
 
 # https://taichi.readthedocs.io/en/stable/syntax.html
 # see pass by value for ti.func
@@ -22,7 +17,6 @@ PERTURBATION = 10E-6  # The perturbation used to avoid clashes
 # Now with CDE D2Q5 tutorial 1
 # CDE would only change when the domain_id != 0 (not water)
 # Connection help identify inside or outside
-
 
 @ti.data_oriented
 class lbibcell_solver:
