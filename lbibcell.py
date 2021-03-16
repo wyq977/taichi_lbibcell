@@ -10,13 +10,14 @@ SIGNAL_decay = 1e-5
 SIGNAL_production = 1e-4
 SIGNAL_initalcondition = 1.0
 
-EPSILON = 10E-10  # The delta used in double comparisons
-PERTURBATION = 10E-6  # The perturbation used to avoid clashes
+EPSILON = 10e-10  # The delta used in double comparisons
+PERTURBATION = 10e-6  # The perturbation used to avoid clashes
 
 
 # Now with CDE D2Q5 tutorial 1
 # CDE would only change when the domain_id != 0 (not water)
 # Connection help identify inside or outside
+
 
 @ti.data_oriented
 class lbibcell_solver:
@@ -48,7 +49,7 @@ class lbibcell_solver:
 
     lattice_boundary_neighbours_domain_id : ti.Vector
 
-        
+
     c : ti.field
         Concentration distribution for the signalling molecules
     cde_f_old : ti.Vector
@@ -77,10 +78,8 @@ class lbibcell_solver:
         ################################################################################
         self.rho = ti.field(dtype=ti.f32, shape=(size_x, size_y))
 
-        self.fluid_vel = ti.Vector.field(
-            2, dtype=ti.f32, shape=(size_x, size_y))
-        self.fluid_force = ti.Vector.field(
-            2, dtype=ti.f32, shape=(size_x, size_y))
+        self.fluid_vel = ti.Vector.field(2, dtype=ti.f32, shape=(size_x, size_y))
+        self.fluid_force = ti.Vector.field(2, dtype=ti.f32, shape=(size_x, size_y))
         self.f_old = ti.Vector.field(9, dtype=ti.f32, shape=(size_x, size_y))
         self.f_new = ti.Vector.field(9, dtype=ti.f32, shape=(size_x, size_y))
 
@@ -92,14 +91,14 @@ class lbibcell_solver:
         ################################################################################
         # each physical grid has pointer to its boundary nodes
         self.lattice_boundary_neighbours = ti.Matrix.field(
-            5, 2, dtype=ti.f32, shape=(size_x, size_y))
+            5, 2, dtype=ti.f32, shape=(size_x, size_y)
+        )
         self.lattice_boundary_neighbours_domain_id = ti.Vector.field(
-            5, dtype=ti.i32, shape=(size_x, size_y))
+            5, dtype=ti.i32, shape=(size_x, size_y)
+        )
 
-        self.cde_f_old = ti.Vector.field(
-            5, dtype=ti.f32, shape=(size_x, size_y))
-        self.cde_f_new = ti.Vector.field(
-            5, dtype=ti.f32, shape=(size_x, size_y))
+        self.cde_f_old = ti.Vector.field(5, dtype=ti.f32, shape=(size_x, size_y))
+        self.cde_f_new = ti.Vector.field(5, dtype=ti.f32, shape=(size_x, size_y))
 
         self.cde_weight = ti.field(dtype=ti.f32, shape=5)
         self.cde_lattice_dir = ti.field(dtype=ti.i32, shape=(5, 2))
@@ -119,27 +118,56 @@ class lbibcell_solver:
     def materialization(self):
         # give default values after init all data structure
         # weight and direction for D2Q9
-        arr = np.array([4.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0, 1.0 / 36.0,
-                        1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0], dtype=np.float32)
+        arr = np.array(
+            [
+                4.0 / 9.0,
+                1.0 / 9.0,
+                1.0 / 9.0,
+                1.0 / 9.0,
+                1.0 / 9.0,
+                1.0 / 36.0,
+                1.0 / 36.0,
+                1.0 / 36.0,
+                1.0 / 36.0,
+            ],
+            dtype=np.float32,
+        )
         self.weight.from_numpy(arr)
 
-        arr = np.array([[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1], [1, 1],
-                        [-1, 1], [-1, -1], [1, -1]], dtype=np.int32)
+        arr = np.array(
+            [
+                [0, 0],
+                [1, 0],
+                [0, 1],
+                [-1, 0],
+                [0, -1],
+                [1, 1],
+                [-1, 1],
+                [-1, -1],
+                [1, -1],
+            ],
+            dtype=np.int32,
+        )
         self.lattice_dir.from_numpy(arr)
 
         # weight and direction for D2Q5
-        arr = np.array([2.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0,
-                        1.0 / 6.0, 1.0 / 6.0], dtype=np.float32)
-        self.cde_weight.from_numpy(arr)
         arr = np.array(
-            [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], dtype=np.int32)
+            [2.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0], dtype=np.float32
+        )
+        self.cde_weight.from_numpy(arr)
+        arr = np.array([[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], dtype=np.int32)
         self.cde_lattice_dir.from_numpy(arr)
 
         # init geo
-        arr = np.array([[self.size_x / 2, self.size_y / 2],
-                        [self.size_x * 7 / 16, self.size_y * 5 / 8],
-                        [self.size_x / 2, self.size_y * 3 / 4],
-                        [self.size_x * 5 / 8, self.size_y * 5 / 8]], dtype=np.float32)
+        arr = np.array(
+            [
+                [self.size_x / 2, self.size_y / 2],
+                [self.size_x * 7 / 16, self.size_y * 5 / 8],
+                [self.size_x / 2, self.size_y * 3 / 4],
+                [self.size_x * 5 / 8, self.size_y * 5 / 8],
+            ],
+            dtype=np.float32,
+        )
         # arr = np.array([[25, 25], [20, 30], [25, 35], [30, 30]], dtype=np.float32)
         self.init_geo.from_numpy(arr)
 
@@ -154,15 +182,15 @@ class lbibcell_solver:
         # vec = ti.Vector.field(2, dtype=ti.f32, shape=(n))
         # index_vec = ti.Vector.field(2, dtype=ti.i32, shape=(n))
         # equals to the connection in LBIBCell scope
-        if (vec[i][0] == vec[j][0]):  # x_i == x_j change to
+        if vec[i][0] == vec[j][0]:  # x_i == x_j change to
             tmp_rand = -PERTURBATION + ti.random() * 2 * PERTURBATION
-            while (tmp_rand < 5.0 * EPSILON):
+            while tmp_rand < 5.0 * EPSILON:
                 tmp_rand = -PERTURBATION + ti.random() * 2 * PERTURBATION
             vec[i][0] += tmp_rand
 
-        if (vec[i][1] == vec[j][1]):  # y_i == y_j
+        if vec[i][1] == vec[j][1]:  # y_i == y_j
             tmp_rand = -PERTURBATION + np.random.rand() * 2 * PERTURBATION
-            while (tmp_rand < 5.0 * EPSILON):
+            while tmp_rand < 5.0 * EPSILON:
                 tmp_rand = -PERTURBATION + ti.random() * 2 * PERTURBATION
             vec[i][1] += tmp_rand
 
@@ -180,15 +208,17 @@ class lbibcell_solver:
         min_y = ti.ceil(ti.min(vec[i][1], vec[j][1]))
         max_y = ti.floor(ti.max(vec[i][1], vec[j][1]))
 
-        print('[Debug!] Generating boundary nodes...')
+        print("[Debug!] Generating boundary nodes...")
         # TODO: change
         # unroll matrix, recommended way
         # for x, y in self.lattice_boundary_neighbours:
         # for x in ti.static(range(self.size_x)): # too slow
         count = 0
         for x in ti.ndrange((0, self.size_x)):
-            if x < min_x: continue
-            elif x > max_x: continue
+            if x < min_x:
+                continue
+            elif x > max_x:
+                continue
             # get all nodes intercepted with vectical grid lines
             y_hat = a * x + b
             idx_y_s = ti.cast(ti.floor(y_hat), ti.int32)
@@ -196,7 +226,7 @@ class lbibcell_solver:
 
             # ERROR: here
             # TODO: condition on inside outside is more difficult
-            if (vec[i][0] < vec[j][0]):
+            if vec[i][0] < vec[j][0]:
                 # print('[Debug!] North is inside')
                 # north is inside N == 2 S == 4, Dont forget to inverse that !!
                 self.lattice_boundary_neighbours[x, idx_y_n][4, 0] = x
@@ -217,15 +247,16 @@ class lbibcell_solver:
                 self.lattice_boundary_neighbours[x, idx_y_s][2, 1] = y_hat
                 self.lattice_boundary_neighbours_domain_id[x, idx_y_n][2] = 1
 
-
         for y in ti.ndrange((0, self.size_y)):
-            if y < min_y: continue
-            elif y > max_y: continue
+            if y < min_y:
+                continue
+            elif y > max_y:
+                continue
             # get all nodes intercepted with horizontal grid lines
             x_hat = (y - b) / a
             idx_x_w = ti.cast(ti.floor(x_hat), ti.int32)
             idx_x_e = ti.cast(ti.ceil(x_hat), ti.int32)
-            if (vec[i][1] > vec[j][1]):
+            if vec[i][1] > vec[j][1]:
                 # east is inside E == 1 W == 3, Dont forget to inverse that !!
                 self.lattice_boundary_neighbours[idx_x_e, y][3, 0] = x_hat
                 self.lattice_boundary_neighbours[idx_x_e, y][3, 1] = y
@@ -247,20 +278,25 @@ class lbibcell_solver:
 
                 self.lattice_boundary_neighbours[idx_x_w, y][1, 0] = x_hat
                 self.lattice_boundary_neighbours[idx_x_w, y][1, 1] = y
-                self.lattice_boundary_neighbours_domain_id[idx_x_w, y][1] = 1  
+                self.lattice_boundary_neighbours_domain_id[idx_x_w, y][1] = 1
 
-
-        print(count, '\t')
-        print('boundary nodes added to the east of the geo node:')
+        print(count, "\t")
+        print("boundary nodes added to the east of the geo node:")
         # print('{} boundary nodes added to the east of the geo node: [bound --- physical]'.format(count))
-        
+
     @ti.func
     def f_eq_d2q9(self, i, j, k):
-        eu = ti.cast(self.lattice_dir[k, 0], ti.f32) * self.fluid_vel[i, j][0] \
+        eu = (
+            ti.cast(self.lattice_dir[k, 0], ti.f32) * self.fluid_vel[i, j][0]
             + ti.cast(self.lattice_dir[k, 1], ti.f32) * self.fluid_vel[i, j][1]
-        uv = self.fluid_vel[i, j][0]**2.0 + self.fluid_vel[i, j][1]**2.0
-        return self.weight[k] * self.rho[i, j] * (1.0 + 3.0 * eu + 4.5 * eu**2 - 1.5 * uv)
-       
+        )
+        uv = self.fluid_vel[i, j][0] ** 2.0 + self.fluid_vel[i, j][1] ** 2.0
+        return (
+            self.weight[k]
+            * self.rho[i, j]
+            * (1.0 + 3.0 * eu + 4.5 * eu ** 2 - 1.5 * uv)
+        )
+
     @ti.func
     def update_all_domain_id(self):
         for i, j in ti.ndrange((0, self.size_x), (0, self.size_x)):
@@ -268,8 +304,7 @@ class lbibcell_solver:
                 # print('[Debug!] Updating domain id to 1 at [{}, {}]'.format(i, j))
                 self.domain_id[i, j] = 1
             # else:
-                # print('[Debug!] Not updating domain id to 1 at [{}, {}]'.format(i, j))
-
+            # print('[Debug!] Not updating domain id to 1 at [{}, {}]'.format(i, j))
 
     @ti.kernel
     def cure_lattice(self):
@@ -278,21 +313,23 @@ class lbibcell_solver:
         # 2. generateBoundaryNodes and store in self.lattice_boundary_neighbours
         # see https://github.com/taichi-dev/taichi/blob/a58a9af78b3c2708178db11499ff0796f8ce338f/benchmarks/mpm2d.py
         # np.random.seed(0)  # set seed before pertuabtion
-        # TODO: change the hack now to loop get the connection from the last one to the first one        
-        print('[Debug!] Perturbating: {} and {}'.format(self.init_geo.shape[0] - 1, 0))
+        # TODO: change the hack now to loop get the connection from the last one to the first one
+        print("[Debug!] Perturbating: {} and {}".format(self.init_geo.shape[0] - 1, 0))
         self.perturb_connections(self.init_geo, self.init_geo.shape[0] - 1, 0)
-        self.generate_boundary_nodes_on_lattice_grid(self.init_geo, self.init_geo.shape[0] - 1, 0)
+        self.generate_boundary_nodes_on_lattice_grid(
+            self.init_geo, self.init_geo.shape[0] - 1, 0
+        )
         for i in ti.static(range(self.init_geo.shape[0])):
             for j in ti.static(range(self.init_geo.shape[0])):
-                if (i % self.init_geo.shape[0] + 1 != j % self.init_geo.shape[0]):
+                if i % self.init_geo.shape[0] + 1 != j % self.init_geo.shape[0]:
                     # ERROR with continue, for some reason continue does not work
                     pass
                 else:
-                    print('[Debug!] Perturbating: {} and {}'.format(i, j))
+                    print("[Debug!] Perturbating: {} and {}".format(i, j))
                     self.perturb_connections(self.init_geo, i, j)
                     self.generate_boundary_nodes_on_lattice_grid(self.init_geo, i, j)
                     # reinit CDE solver
-        
+
         # 3. update all domain identifiers of the
         self.update_all_domain_id()
 
@@ -319,7 +356,7 @@ class lbibcell_solver:
                 for k in ti.static(range(5)):
                     self.cde_f_old[i, j][k] = SIGNAL_initalcondition / 5.0
                     self.cde_f_new[i, j][k] = SIGNAL_initalcondition / 5.0
-                
+
     @ti.kernel
     def init_fluid_solver(self):
         # TODO: add force
@@ -327,8 +364,10 @@ class lbibcell_solver:
             for k in ti.static(range(9)):
                 ip = i - self.lattice_dir[k, 0]
                 jp = j - self.lattice_dir[k, 1]
-                self.f_new[i, j][k] = (1.0 - self.inv_tau) * self.f_old[ip, jp][k] \
-                                    + self.f_eq_d2q9(ip, jp, k) * self.inv_tau    
+                self.f_new[i, j][k] = (1.0 - self.inv_tau) * self.f_old[ip, jp][
+                    k
+                ] + self.f_eq_d2q9(ip, jp, k) * self.inv_tau
+
     @ti.func
     def get_cde_c(self, i, j):
         return ts.vector.summation(self.cde_f_new[i, j])
@@ -340,18 +379,17 @@ class lbibcell_solver:
             for k in ti.static(range(9)):
                 ip = i - self.lattice_dir[k, 0]
                 jp = j - self.lattice_dir[k, 1]
-                self.f_new[i, j][k] = (1.0 - self.inv_tau) * self.f_old[ip, jp][k] \
-                                    + self.f_eq_d2q9(ip, jp, k) * self.inv_tau
+                self.f_new[i, j][k] = (1.0 - self.inv_tau) * self.f_old[ip, jp][
+                    k
+                ] + self.f_eq_d2q9(ip, jp, k) * self.inv_tau
 
     @ti.kernel
     def test_ti_scope(self):
-        self.cde_f_new[1,2][4] = 5.0
-        print(self.get_cde_c(1,2))
-
-
+        self.cde_f_new[1, 2][4] = 5.0
+        print(self.get_cde_c(1, 2))
 
     def debug_show(self):
-        filename = f'frame_lbibcell.png'   # create filename with suffix png
+        filename = f"frame_lbibcell.png"  # create filename with suffix png
         # change the res to integer
         # gui = ti.GUI('lbm solver', (self.size_x, self.size_y))
         # print('[Debug!] before')
@@ -363,10 +401,11 @@ class lbibcell_solver:
         # img[0:50] = img[0:5].astype(numpy.float32)
         # gui.set_image(img)
         # gui.show(filename)  # export and show in GUI
-        print(f'Frame is recorded in {filename}')
+        print(f"Frame is recorded in {filename}")
         ti.imwrite(self.domain_id.to_numpy(), filename)
 
-if __name__ == '__main__':
-        ti.init(arch=ti.gpu)
-        lbm = lbibcell_solver(500, 500, 0.01, 100)
-        lbm.debug_show()
+
+if __name__ == "__main__":
+    ti.init(arch=ti.gpu)
+    lbm = lbibcell_solver(500, 500, 0.01, 100)
+    lbm.debug_show()

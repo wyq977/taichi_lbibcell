@@ -4,14 +4,16 @@ import taichi_glsl as ts
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib as mpl
-from helper import load_geometry_txt
+from helper import load_geometry_txt, create_evenly_spaced_circle
 from PIL import Image
 import time
 
 FORCE = 0.02  # membrane tension between each node on the geometry of the cell
-SIGNAL_initalcondition = 1.0
-SIGNAL_production = 1e-3
-SIGNAL_decay = 1e-5
+SIGNAL_initalcondition = 0.0
+SIGNAL_influx = 0.5
+SIGNAL_production = 1e-1
+SIGNAL_decay = 0
+RES = 200  # fixed resolution for now
 box = [190, 190, 210, 210]
 
 
@@ -22,6 +24,7 @@ class lbib_solver:
         self.size_y = size_y
         self.steps = steps
         self.rho = ti.field(dtype=ti.f32, shape=(size_x, size_y))
+        self.celltype = ti.field(dtype=ti.i32, shape=(size_x, size_y))
         self.niu = niu
         self.tau = 2  # 3.0 * niu + 0.5
         self.inv_tau = 1.0 / self.tau
@@ -55,28 +58,24 @@ class lbib_solver:
 
     def materialization(self, filename, bc_type, bc_value):
         try:
-            boundary_points, _ = load_geometry_txt(filename)
-            # fig, ax = plt.subplots()
-            # ax.scatter(boundary_points[:, 0], boundary_points[:, 1])
-            # fig.savefig('test.pdf', dpi=300)
+            # boundary_points, _ = load_geometry_txt(filename)
+            boundary_points = create_evenly_spaced_circle(
+                self.size_x, self.size_y, 50, res=200
+            )
         except IOError:
             print(IOError)
             exit()
-
-        # exit()
 
         # TODO: store the BoundaryNode produced dynamically
         # TODO: Maybe use a large list and a hashing function will do the jobs, need to check how many
         # TODO: Divide and reconnet self.boundary
         # FIXME:
         self.num_connection = boundary_points.shape[0]
-        self.boundary = ti.Vector.field(2, dtype=ti.f32, shape=(self.num_connection,))
-        self.boundary_force = ti.Vector.field(
-            2, dtype=ti.f32, shape=(self.num_connection,)
-        )
-        self.boundary_vel = ti.Vector.field(
-            2, dtype=ti.f32, shape=(self.num_connection,)
-        )
+        self.boundary = ti.field(dtype=ti.f32, shape=(self.num_connection, RES, 2))
+        # self.boundary_force = ti.field(
+        #     dtype=ti.f32, shape=(self.num_connection, RES, 2)
+        # )
+        # self.boundary_vel = ti.field(dtype=ti.f32, shape=(self.num_connection, RES, 2))
         # the nodes are connected in clock wise manner, and closed
         self.boundary.from_numpy(boundary_points)
         self.bc_type.from_numpy(np.array(bc_type, dtype=np.int32))
@@ -120,6 +119,74 @@ class lbib_solver:
         # self.cde_w.from_numpy(arr)
         # arr = np.array([[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], dtype=np.int32)
         # self.cde_e.from_numpy(arr)
+
+    @ti.func
+    def is_point_inside_polygon(self, i, j, polygon_lst, idx, length):
+        # https://github.com/taichi-dev/taichi/blob/master/taichi/math/geometry_util.h
+        count = 0
+        # qx, qy = 123532.0, 532421123.0
+        a = ti.Vector([i, j])
+        b = ti.Vector([123532.0, 532421123.0])
+        for k in range(length):
+            # assume the boundary points are organized in circle-wise manner
+            # c = polygon[k]
+            # d = polygon[(k + 1) % length]
+            c = ti.Vector([polygon_lst[idx, k, 0], polygon_lst[idx, k, 1]])
+            d = ti.Vector(
+                [
+                    polygon_lst[idx, (k + 1) % length, 0],
+                    polygon_lst[idx, (k + 1) % length, 1],
+                ]
+            )
+
+            term_1 = (c - a).cross(b - a) * (b - a).cross(d - a)
+            term_2 = (a - d).cross(c - d) * (c - d).cross(b - d)
+            if term_1 > 0 and term_2 > 0:  # see if intersect
+                count += 1
+
+        return count
+
+    @ti.func
+    def get_min_max_box_polygon(self, idx, length):
+        min_x = float(self.size_x)
+        min_y = float(self.size_y)
+        max_x = 0.0
+        max_y = 0.0
+        for i in range(length):
+            if min_x > self.boundary[idx, i, 0]:
+                min_x = self.boundary[idx, i, 0]
+            if max_x <= self.boundary[idx, i, 0]:
+                max_x = self.boundary[idx, i, 0]
+            if min_y > self.boundary[idx, i, 1]:
+                min_y = self.boundary[idx, i, 1]
+            if max_y <= self.boundary[idx, i, 1]:
+                max_y = self.boundary[idx, i, 1]
+        return (
+            int(min_x),
+            int(min_y),
+            ti.cast(ti.ceil(max_x), int),
+            ti.cast(ti.ceil(max_y), int),
+        )
+
+    @ti.kernel
+    def mesh_lattice(self):
+        for k in range(self.num_connection):
+            # min_x, min_y, max_x, max_y = self.get_min_max_box_polygon(k, RES)
+            for i, j in ti.ndrange((0, self.size_x), (0, self.size_y)):
+                # for i, j in ti.ndrange((min_x, max_x), (min_y, max_y)):
+                count = self.is_point_inside_polygon(i, j, self.boundary, k, RES)
+                if count % 2 == 1:
+                    self.celltype[i, j] = k
+        # for i, j in ti.ndrange((0, self.size_x), (0, self.size_y)):
+        #     # count = self.is_point_inside_polygon(i, j, self.boundary, 360)
+        #     # if count % 2 == 1:
+        #     #     self.celltype[i, j] = 0
+        #     # else:
+        #     #     self.celltype[i, j] = 1
+        #     for k in ti.ndrange((0, self.num_connection)):
+        #         count = self.is_point_inside_polygon(i, j, self.boundary, k, RES)
+        #         if count % 2 == 1:
+        #             self.celltype[i, j] = k
 
     @ti.func
     def f_eq(self, i, j, k):
@@ -168,11 +235,19 @@ class lbib_solver:
         return self.w[k] * production
 
     @ti.kernel
+    # speed would explode now
+    def influx_bottom(self):
+        for j in ti.ndrange((0, self.size_y)):
+            self.c[0, j] = SIGNAL_influx
+            for k in ti.static(range(9)):
+                self.cde_f_old[0, j][k] = SIGNAL_initalcondition / 9.0
+
+    @ti.kernel
     def apply_bc(self):
         # left and right
         for j in ti.ndrange(1, self.size_y - 1):
             # left: dr = 0; ibc = 0; jbc = j; inb = 1; jnb = j
-            self.apply_bc_core(0, 0, j, 1, j)
+            # self.apply_bc_core(0, 0, j, 1, j)
 
             # right: dr = 2; ibc = size_x-1; jbc = j; inb = size_x-2; jnb = j
             self.apply_bc_core(2, self.size_x - 1, j, self.size_x - 2, j)
@@ -187,18 +262,6 @@ class lbib_solver:
 
     @ti.func
     def calculate_membrane_tension(self, i, j, force_const):
-        # cannot use nested func
-        # dist = ti.sqrt(
-        #     (self.boundary[j][0] - self.boundary[j][0]) ** 2
-        #     + (self.boundary[j][0] - self.boundary[j][0]) ** 2
-        # )
-        # self.boundary_force[i] += (
-        #     (self.boundary[j] - self.boundary[i]) * force_const / dist
-        # )  # for point i
-        # self.boundary_force[j] += (
-        #     (self.boundary[i] - self.boundary[j]) * force_const / dist
-        # )  # for point j
-        # dist = ts.vector.distance(self.boundary[i], self.boundary[j])
         # Use Taichi GLSL func
         self.boundary_force[i] += (
             ts.vector.normalize((self.boundary[j] - self.boundary[i])) * force_const
@@ -211,6 +274,7 @@ class lbib_solver:
     def init(self):
         for i, j in self.rho:
             self.c[i, j] = 0.0
+            self.celltype[i, j] = 0
 
         min_x, min_y, max_x, max_y = box
         for i, j in ti.ndrange((min_x, max_x), (min_y, max_y)):
@@ -277,11 +341,11 @@ class lbib_solver:
                     + self.f_eq_with_force(i, j, k)
                 )
                 # cde
-                self.cde_f_new[i, j][k] = (1.0 - self.inv_tau) * self.cde_f_old[ip, jp][
-                    k
-                ] + self.f_eq_cde(
-                    ip, jp, k
-                ) * self.inv_tau  # + self.react(i, j, k)
+                self.cde_f_new[i, j][k] = (
+                    (1.0 - self.inv_tau) * self.cde_f_old[ip, jp][k]
+                    + self.f_eq_cde(ip, jp, k) * self.inv_tau
+                    + self.react(i, j, k)
+                )
 
     @ti.kernel
     def update_fluid_vel(self):
@@ -332,11 +396,17 @@ class lbib_solver:
         if self.bc_type[dr] == 0:  # Dirichlet
             self.vel[ibc, jbc][0] = self.bc_value[dr, 0]
             self.vel[ibc, jbc][1] = self.bc_value[dr, 1]
+            self.rho[ibc, jbc] = self.rho[inb, jnb]  # change local density
         elif self.bc_type[dr] == 1:  # Neumann
             self.vel[ibc, jbc][0] = self.vel[inb, jnb][0]
             self.vel[ibc, jbc][1] = self.vel[inb, jnb][1]
+            self.rho[ibc, jbc] = self.rho[inb, jnb]  # change local density
+        elif self.bc_type[dr] == 2:  # iso-pressure wall condition
+            inb, jnb = ibc, jbc  # density stay
+            rho = self.rho[ibc, jbc]  # keep constant pressure at 1.0, speed untouched
+            for k in ti.static(range(9)):
+                self.f_old[ibc, jbc][k] /= rho
 
-        self.rho[ibc, jbc] = self.rho[inb, jnb]  # change local density
         for k in ti.static(range(9)):
             self.f_old[ibc, jbc][k] = (
                 self.f_eq(ibc, jbc, k)
@@ -364,55 +434,118 @@ class lbib_solver:
         vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
         return vel_mag
 
+    def draw_c_vor_vel(self):
+        SHIFT = 1e-10  # prevent zero in LogNorm case
+        vel = self.vel.to_numpy()
+        c = self.c.to_numpy()
+        c += SHIFT
+        ugrad = np.gradient(vel[:, :, 0])
+        vgrad = np.gradient(vel[:, :, 1])
+        vor = ugrad[1] - vgrad[0]
+        colors = [
+            (1, 1, 0),
+            (0.953, 0.490, 0.016),
+            (0, 0, 0),
+            (0.176, 0.976, 0.529),
+            (0, 1, 1),
+        ]
+        my_cmap = mpl.colors.LinearSegmentedColormap.from_list("my_cmap", colors)
+        vor_img = cm.ScalarMappable(
+            norm=mpl.colors.Normalize(vmin=-0.02, vmax=0.02), cmap=my_cmap
+        ).to_rgba(vor)
+        vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
+        vel_img = cm.plasma(vel_mag / 0.15)
+        c_img_lognorm = cm.ScalarMappable(
+            norm=mpl.colors.LogNorm(vmin=SHIFT, vmax=1 + SHIFT),
+            cmap="coolwarm",
+        ).to_rgba(c)
+        c_img_linear = cm.ScalarMappable(
+            norm=mpl.colors.Normalize(vmin=SHIFT, vmax=1 + SHIFT),
+            cmap="coolwarm",
+        ).to_rgba(c)
+        img_r = np.concatenate((vel_img, vor_img), axis=1)
+        img_l = np.concatenate((c_img_lognorm, c_img_linear), axis=1)
+        img = np.concatenate((img_l, img_r), axis=0)
+        return img
+
     def render(self, gui):
         # code fragment displaying vorticity is contributed by woclass
         # https://github.com/taichi-dev/taichi/issues/1699#issuecomment-674113705 for img
         vel = self.vel.to_numpy()
+        ugrad = np.gradient(vel[:, :, 0])
+        vgrad = np.gradient(vel[:, :, 1])
+        vor = ugrad[1] - vgrad[0]
+        colors = [
+            (1, 1, 0),
+            (0.953, 0.490, 0.016),
+            (0, 0, 0),
+            (0.176, 0.976, 0.529),
+            (0, 1, 1),
+        ]
+        my_cmap = mpl.colors.LinearSegmentedColormap.from_list("my_cmap", colors)
+        vor_img = cm.ScalarMappable(
+            norm=mpl.colors.Normalize(vmin=-0.02, vmax=0.02), cmap=my_cmap
+        ).to_rgba(vor)
         vel_mag = (vel[:, :, 0] ** 2.0 + vel[:, :, 1] ** 2.0) ** 0.5
         vel_img = cm.plasma(vel_mag / 0.15)
-        density = self.rho.to_numpy()
-        den_img = np.stack((density, density, density, density), axis=2)
-        c_density = self.c.to_numpy()
+        # density = self.rho.to_numpy()
+        # den_img = np.stack((density, density, density, density), axis=2)
+        # c_density = self.c.to_numpy()
         # c_img = np.stack((c_density, c_density, c_density, c_density), axis=2)
         c_img = cm.ScalarMappable(
-            norm=mpl.colors.LogNorm(vmin=1e-20, vmax=1), cmap="Spectral"
+            norm=mpl.colors.LogNorm(vmin=1e-20, vmax=1),
+            # norm=mpl.colors.Normalize(vmin=0, vmax=1),
+            cmap="coolwarm"
+            # cmap="Spectral"
         ).to_rgba(self.c.to_numpy())
-        zero = np.zeros_like(vel_img)
-        img_r = np.concatenate((vel_img, den_img), axis=1)
-        img_l = np.concatenate((c_img, c_img), axis=1)
+        mask = cm.ScalarMappable(
+            norm=mpl.colors.Normalize(vmin=0, vmax=self.num_connection), cmap="coolwarm"
+        ).to_rgba(self.celltype.to_numpy())
+        img_r = np.concatenate((vel_img, vor_img), axis=1)
+        img_l = np.concatenate((mask, c_img), axis=1)
         img = np.concatenate((img_l, img_r), axis=0)
         boundary = self.boundary.to_numpy()
+        boundary = boundary.reshape(self.num_connection * RES, 2)
         boundary[:, 0] /= 2 * self.size_x
         boundary[:, 1] /= 2 * self.size_y
         gui.set_image(img)
         gui.circles(boundary, radius=1)
         gui.show()
 
-    def solve(self, render_dir=None):
+    def solve(self, render_dir=None, show_gui=False):
+        if show_gui:
+            gui = ti.GUI("LBIB Solver", (2 * self.size_x, 2 * self.size_y))
+
         if render_dir:
-            # gui = ti.GUI("LBIB Solver", (2 * self.size_x, 2 * self.size_y))
             video_manager = ti.VideoManager(
                 output_dir=render_dir, framerate=24, automatic_build=False
             )
         self.init()
+        self.mesh_lattice()
         for i in range(self.steps):
-            self.reset_boundary_force()
-            self.calculate_force()
-            self.distribute_force()
+            # self.reset_boundary_force()
+            # self.calculate_force()
+            # self.distribute_force()
             self.collide_fluid()
             self.update_fluid_vel()
-            self.collect_velocity_fast()
-            self.move_geometry()
+            # self.collect_velocity_fast()
+            # self.move_geometry()
+            # self.mesh_lattice()
+            # self.influx_bottom()
             self.apply_bc()
-            # if render_dir:
-            #     self.render(gui)
+            self.mesh_lattice()
 
-            # if i % 50 == 0 and render_dir:
+            if i % 50 == 0:
+                print(f"\rSteps {i}/{self.steps}", end="")
+                # np.save("saved_c_{:d}.npy".format(i), self.c.to_numpy())
+                # np.save("saved_rho_{:d}.npy".format(i), self.rho.to_numpy())
+                # np.save("saved_boundary_{:d}.npy".format(i), self.boundary.to_numpy())
+
+            if show_gui:
+                self.render(gui)
+
             if render_dir:
-                # img = gui.get_image()  # cannot get image
-                img = self.draw_c()
-                self.draw_fluid_vel()
-                print(f"\rFrame {i}/{self.steps} is recorded", end="")
+                img = self.draw_c_vor_vel()
                 video_manager.write_frame(img)
 
         if render_dir:
@@ -428,21 +561,22 @@ if __name__ == "__main__":
     # U, flow speed: 0.01
     # niu, kinematic viscosity, 0.01
     # L, domain length
-    ti.init(arch=ti.gpu)
-    # ti.init(cpu_max_num_threads=2)
+    # ti.init(arch=ti.gpu)
+    ti.init(cpu_max_num_threads=4)
 
     lbib = lbib_solver(
         400,
         400,
         0.0399,
         [0, 0, 0, 0],
-        [[0.1, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
+        [[0.1, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.1]],
         # "data/parameters_400_by_400_radius_50_center_res_50.txt",
         # [[0.0, 0.2], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], 'parameters_400_by_400_radius_50_center_res_100.txt', steps=10000)
         # [[0.0, 0.1], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]],
         "data/parameters_400_by_400_radius_40_center_res_360.txt",
-        steps=5000,
+        steps=500,
     )
-    lbib.solve("results/")
+    # lbib.solve(show_gui=1)
+    lbib.solve()
     end = time.perf_counter()
     print("\nSimulation time for {:d} iter. : {:.2f}s".format(lbib.steps, end - start))
